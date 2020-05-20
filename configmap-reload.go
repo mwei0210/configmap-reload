@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -25,6 +27,7 @@ var (
 	webhookStatusCode = flag.Int("webhook-status-code", 200, "the HTTP status code indicating successful triggering of reload")
 	listenAddress     = flag.String("web.listen-address", ":9533", "Address to listen on for web interface and telemetry.")
 	metricPath        = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
+	execPath          = flag.String("exec-path", "", "the path to be executed")
 
 	lastReloadError = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
@@ -79,8 +82,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	if len(webhook) < 1 {
-		log.Println("Missing webhook-url")
+	actionable := false
+
+	if len(webhook) > 1 {
+		actionable = true
+	}
+
+	if len(*execPath) > 1 {
+		if _, err := os.Stat(*execPath); err != nil {
+			if os.IsNotExist(err) {
+				log.Println("Missing executable in path")
+			} else {
+				log.Println(err.Error())
+			}
+			log.Println()
+			flag.Usage()
+			os.Exit(1)
+		}
+		actionable = true
+	}
+
+	if !actionable {
+		log.Println("Missing webhook-url & exec-path")
 		log.Println()
 		flag.Usage()
 		os.Exit(1)
@@ -100,6 +123,22 @@ func main() {
 					continue
 				}
 				log.Println("config map updated")
+				cmd := exec.Command(*execPath)
+				stdout, err := cmd.StdoutPipe()
+				if err != nil {
+					log.Println("error:", err)
+				}
+				log.Println("Executing file...")
+				go func() {
+					scanner := bufio.NewScanner(stdout)
+					for scanner.Scan() {
+						log.Println(scanner.Text())
+					}
+				}()
+				if err = cmd.Run(); err == nil {
+					log.Printf("Executed with error: %v", err)
+					log.Println()
+				}
 				for _, h := range webhook {
 					begun := time.Now()
 					req, err := http.NewRequest(*webhookMethod, h.String(), nil)
