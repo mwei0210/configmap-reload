@@ -28,6 +28,7 @@ var (
 	listenAddress     = flag.String("web.listen-address", ":9533", "Address to listen on for web interface and telemetry.")
 	metricPath        = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 	execPath          = flag.String("exec-path", "", "the path to be executed")
+	entryExec         = flag.String("entry-path", "", "the path to be executed when pod is up")
 
 	lastReloadError = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
@@ -107,6 +108,35 @@ func main() {
 		log.Println()
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	if len(*entryExec) > 1 {
+		if _, err := os.Stat(*entryExec); err != nil {
+			if os.IsNotExist(err) {
+				log.Println("Missing executable in path")
+			} else {
+				log.Println(err.Error())
+			}
+			log.Println()
+			flag.Usage()
+			os.Exit(1)
+		}
+		cmd := exec.Command(*entryExec)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			log.Println("error:", err)
+		}
+		log.Println("Executing entry file...")
+		go func() {
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				log.Println(scanner.Text())
+			}
+		}()
+		if err = cmd.Run(); err == nil {
+			log.Printf("Executed with error: %v", err)
+			log.Println()
+		}
 	}
 
 	watcher, err := fsnotify.NewWatcher()
