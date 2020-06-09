@@ -133,7 +133,7 @@ func main() {
 				log.Println(scanner.Text())
 			}
 		}()
-		if err = cmd.Run(); err == nil {
+		if err = cmd.Run(); err != nil {
 			log.Printf("Executed with error: %v", err)
 			log.Println()
 		}
